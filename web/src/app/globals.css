@@ -114,6 +114,8 @@
   --color-brand-gold: #f2c94c;
 
   --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+  /* Handwritten accents — marketing pages only */
+  --font-hand: var(--font-caveat), "Segoe Print", cursive;
 
   --shadow-raised: var(--shadow-raised);
   --shadow-float: var(--shadow-float);
