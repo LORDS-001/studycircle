@@ -17,3 +17,7 @@ All photos are from [Unsplash](https://unsplash.com) and used under the [Unsplas
 | role-timekeeper.jpg | https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d |
 | role-scribe.jpg | https://images.unsplash.com/photo-1531123897727-8f129e1688ce |
 | role-questioner.jpg | https://images.unsplash.com/photo-1539571696357-5a69c17a67c6 |
+| role-facilitator-tall.jpg | https://images.unsplash.com/photo-1494790108377-be9c29b29330 |
+| role-timekeeper-tall.jpg | https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d |
+| role-scribe-tall.jpg | https://images.unsplash.com/photo-1531123897727-8f129e1688ce |
+| role-questioner-tall.jpg | https://images.unsplash.com/photo-1539571696357-5a69c17a67c6 |
