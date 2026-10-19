@@ -1,0 +1,405 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * StudyCircle tokens — the Scholar palette.
+ * 60% cream canvas, 30% deep blue structure, 7% teal progress, 3% gold celebration.
+ * Gold is never used for text on cream (1.45:1). Teal text only at 14px+ medium.
+ */
+:root {
+  --background: #f7f5ee;
+  --surface: #fdfcf8;
+  --surface-2: #f0ede3;
+  --surface-3: #e8e4d8;
+  --foreground: #243b6b;
+  --muted-foreground: #56648a;
+  --subtle-foreground: #6e7a99;
+  --border: #e6e1d3;
+  --border-strong: #d4cdb9;
+
+  --primary: #243b6b;
+  --primary-hover: #1b2e55;
+  --primary-foreground: #ffffff;
+
+  --teal: #237c74;
+  --teal-hover: #1c665f;
+  --teal-foreground: #ffffff;
+  --teal-text: #237c74;
+  --teal-soft: #e2efec;
+
+  --gold: #f2c94c;
+  --gold-foreground: #243b6b;
+  --gold-soft: #fbf0cb;
+
+  --destructive: #b42318;
+  --destructive-soft: #fbe9e6;
+
+  --ring: #237c74;
+  --overlay: rgb(20 30 55 / 0.45);
+
+  --shadow-raised: 0 1px 2px rgb(36 59 107 / 0.06), 0 8px 24px -12px rgb(36 59 107 / 0.18);
+  --shadow-float: 0 2px 4px rgb(36 59 107 / 0.06), 0 24px 48px -16px rgb(36 59 107 / 0.28);
+
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.dark {
+  --background: #111a30;
+  --surface: #17223d;
+  --surface-2: #1d2a49;
+  --surface-3: #263559;
+  --foreground: #f7f5ee;
+  --muted-foreground: #b3bcd3;
+  --subtle-foreground: #8c97b4;
+  --border: #26355a;
+  --border-strong: #34466f;
+
+  --primary: #f7f5ee;
+  --primary-hover: #ffffff;
+  --primary-foreground: #1b2e55;
+
+  --teal: #237c74;
+  --teal-hover: #2a8f86;
+  --teal-foreground: #ffffff;
+  --teal-text: #5fc2b6;
+  --teal-soft: #173a44;
+
+  --gold: #f2c94c;
+  --gold-foreground: #1b2e55;
+  --gold-soft: #3a3a3a;
+
+  --destructive: #f08a7e;
+  --destructive-soft: #3b2230;
+
+  --ring: #5fc2b6;
+  --overlay: rgb(5 10 25 / 0.65);
+
+  --shadow-raised: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px -12px rgb(0 0 0 / 0.5);
+  --shadow-float: 0 2px 4px rgb(0 0 0 / 0.3), 0 24px 48px -16px rgb(0 0 0 / 0.6);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-subtle-foreground: var(--subtle-foreground);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-teal: var(--teal);
+  --color-teal-hover: var(--teal-hover);
+  --color-teal-foreground: var(--teal-foreground);
+  --color-teal-text: var(--teal-text);
+  --color-teal-soft: var(--teal-soft);
+  --color-gold: var(--gold);
+  --color-gold-foreground: var(--gold-foreground);
+  --color-gold-soft: var(--gold-soft);
+  --color-destructive: var(--destructive);
+  --color-destructive-soft: var(--destructive-soft);
+  --color-ring: var(--ring);
+  --color-overlay: var(--overlay);
+
+  /* Brand constants that never flip with the theme */
+  --color-brand-blue: #243b6b;
+  --color-brand-cream: #f7f5ee;
+  --color-brand-teal: #237c74;
+  --color-brand-gold: #f2c94c;
+
+  --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+
+  --shadow-raised: var(--shadow-raised);
+  --shadow-float: var(--shadow-float);
+
+  --ease-out: var(--ease-out);
+  --ease-in-out: var(--ease-in-out);
+  --ease-drawer: var(--ease-drawer);
+
+  --radius-card: 1.125rem;
+  --radius-control: 0.75rem;
+
+  --animate-fade-in: fade-in 220ms var(--ease-out);
+  --animate-rise: rise 320ms var(--ease-out) both;
+  --animate-pop: pop 200ms var(--ease-out);
+}
+
+/* Brand type scale — size / line-height from the guidelines */
+@utility text-display {
+  font-size: 2.5rem;
+  line-height: 3rem;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  @media (width >= 48rem) {
+    font-size: 3rem;
+    line-height: 3.5rem;
+  }
+}
+@utility text-h1 {
+  font-size: 1.75rem;
+  line-height: 2.25rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  @media (width >= 48rem) {
+    font-size: 2rem;
+    line-height: 2.5rem;
+  }
+}
+@utility text-h2 {
+  font-size: 1.5rem;
+  line-height: 2rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+@utility text-h3 {
+  font-size: 1.0625rem;
+  line-height: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+@utility text-body {
+  font-size: 1rem;
+  line-height: 1.5rem;
+  font-weight: 400;
+}
+@utility text-small {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 500;
+}
+@utility text-label {
+  font-size: 0.75rem;
+  line-height: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+@layer base {
+  *,
+  ::after,
+  ::before {
+    border-color: var(--border);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-feature-settings: "ss01", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--gold) 55%, transparent);
+    color: var(--gold-foreground);
+  }
+
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  a[href],
+  label[for],
+  select,
+  summary {
+    cursor: pointer;
+  }
+
+  input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+/* Radix data-state driven enter/exit */
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes overlay-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes content-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -48%) scale(0.97);
+  }
+}
+@keyframes content-out {
+  to {
+    opacity: 0;
+    transform: translate(-50%, -48%) scale(0.98);
+  }
+}
+@keyframes popover-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+@keyframes popover-out {
+  to {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+@keyframes sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+}
+@keyframes sheet-out {
+  to {
+    transform: translateY(100%);
+  }
+}
+
+.anim-overlay[data-state="open"] {
+  animation: overlay-in 200ms var(--ease-out);
+}
+.anim-overlay[data-state="closed"] {
+  animation: overlay-out 150ms var(--ease-out);
+}
+.anim-dialog[data-state="open"] {
+  animation: content-in 240ms var(--ease-out);
+}
+.anim-dialog[data-state="closed"] {
+  animation: content-out 150ms var(--ease-out);
+}
+.anim-popover {
+  transform-origin: var(
+    --radix-dropdown-menu-content-transform-origin,
+    var(--radix-popover-content-transform-origin, var(--radix-tooltip-content-transform-origin, var(--radix-select-content-transform-origin)))
+  );
+}
+/* Bottom sheet on phones, centred dialog from 640px */
+.anim-responsive-dialog[data-state="open"] {
+  animation: sheet-in 380ms var(--ease-drawer);
+}
+.anim-responsive-dialog[data-state="closed"] {
+  animation: sheet-out 220ms var(--ease-out);
+}
+@media (width >= 40rem) {
+  .anim-responsive-dialog[data-state="open"] {
+    animation: content-in 240ms var(--ease-out);
+  }
+  .anim-responsive-dialog[data-state="closed"] {
+    animation: content-out 150ms var(--ease-out);
+  }
+}
+.anim-popover[data-state="open"] {
+  animation: popover-in 180ms var(--ease-out);
+}
+.anim-popover[data-state="closed"] {
+  animation: popover-out 120ms var(--ease-out);
+}
+.anim-sheet[data-state="open"] {
+  animation: sheet-in 380ms var(--ease-drawer);
+}
+.anim-sheet[data-state="closed"] {
+  animation: sheet-out 220ms var(--ease-out);
+}
+
+/* Pressable feedback, only where hover is real for hover styles */
+.pressable {
+  transition:
+    transform 160ms var(--ease-out),
+    background-color 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease,
+    box-shadow 150ms ease;
+}
+.pressable:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* Stagger for a page's first paint — used once per page, never on repeat interactions */
+.stagger > * {
+  animation: rise 360ms var(--ease-out) both;
+}
+.stagger > *:nth-child(2) {
+  animation-delay: 40ms;
+}
+.stagger > *:nth-child(3) {
+  animation-delay: 80ms;
+}
+.stagger > *:nth-child(4) {
+  animation-delay: 120ms;
+}
+.stagger > *:nth-child(5) {
+  animation-delay: 160ms;
+}
+.stagger > *:nth-child(n + 6) {
+  animation-delay: 200ms;
+}
+
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+  .pressable:active:not(:disabled) {
+    transform: none;
+  }
+}
