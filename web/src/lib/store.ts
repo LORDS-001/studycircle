@@ -1,0 +1,384 @@
+"use client";
+
+import { addWeeks, addDays, isBefore } from "date-fns";
+import { create } from "zustand";
+import { persist, createJSONStorage } from "zustand/middleware";
+import { createSeed, type SeedData } from "./seed";
+import { ROLE_ORDER, stepsFor } from "./templates";
+import type {
+  Availability,
+  Group,
+  GroupGoal,
+  ID,
+  Message,
+  PrepItem,
+  Question,
+  Recurrence,
+  Retro,
+  RsvpStatus,
+  Session,
+  SessionTemplate,
+  User,
+  Visibility,
+} from "./types";
+
+/*
+ * Client-side mock backend. Every action maps 1:1 to a future Supabase call
+ * (insert/update + RLS), so screens won't change when the real backend lands.
+ */
+
+export const uid = (prefix = "id") =>
+  `${prefix}-${Math.random().toString(36).slice(2, 8)}${Date.now().toString(36).slice(-4)}`;
+
+const inviteCode = (name: string) =>
+  `${name.replace(/[^a-z]/gi, "").slice(0, 4).toUpperCase().padEnd(4, "X")}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+
+const jitsiUrl = () =>
+  `https://meet.jit.si/studycircle-${Math.random().toString(36).slice(2, 10)}${Math.random().toString(36).slice(2, 10)}`;
+
+export interface NewGroupInput {
+  courseId: ID;
+  name: string;
+  description: string;
+  maxSize: number;
+  visibility: Visibility;
+  goal: GroupGoal;
+  norms: string[];
+  cadence: string;
+  examDate?: string;
+}
+
+export interface NewSessionInput {
+  groupId: ID;
+  title: string;
+  template: SessionTemplate;
+  startsAt: string;
+  durationMin: number;
+  locationType: "video" | "place";
+  place?: string;
+  recurrence: Recurrence;
+  agenda: string;
+  prep: string[];
+  jigsawTopics: Record<ID, string>;
+}
+
+interface State extends SeedData {
+  currentUserId: ID | null;
+  onboarded: boolean;
+
+  signIn: (email?: string) => void;
+  signOut: () => void;
+  updateProfile: (patch: Partial<Pick<User, "name" | "school" | "emailPrefs">>) => void;
+  completeOnboarding: () => void;
+  resetDemo: () => void;
+
+  createCourse: (input: { code: string; title: string; school: string }) => { ok: true; id: ID } | { ok: false; error: string };
+  joinCourse: (courseId: ID) => void;
+  leaveCourse: (courseId: ID) => void;
+
+  createGroup: (input: NewGroupInput) => ID;
+  updateGroup: (groupId: ID, patch: Partial<Group>) => void;
+  joinGroup: (groupId: ID) => "joined" | "pending" | "full" | "already";
+  approveMember: (groupId: ID, userId: ID) => void;
+  declineMember: (groupId: ID, userId: ID) => void;
+  removeMember: (groupId: ID, userId: ID) => void;
+  leaveGroup: (groupId: ID) => void;
+  transferOwnership: (groupId: ID, userId: ID) => void;
+
+  saveAvailability: (groupId: ID, slots: string[]) => void;
+
+  createSession: (input: NewSessionInput) => ID;
+  updateSession: (sessionId: ID, patch: Partial<Session>) => void;
+  deleteSession: (sessionId: ID) => void;
+  rsvp: (sessionId: ID, status: RsvpStatus) => void;
+  togglePrep: (sessionId: ID, prepId: ID) => void;
+  startSession: (sessionId: ID) => void;
+  goToStep: (sessionId: ID, step: number) => void;
+  pauseSession: (sessionId: ID) => void;
+  resumeSession: (sessionId: ID) => void;
+  endSession: (sessionId: ID) => void;
+  updateNotes: (sessionId: ID, patch: Partial<Session["notes"]>) => void;
+
+  addQuestion: (input: Omit<Question, "id" | "createdAt" | "createdBy">) => void;
+  updateQuestion: (id: ID, patch: Partial<Question>) => void;
+  deleteQuestion: (id: ID) => void;
+  recordAttempt: (questionId: ID, correct: boolean) => void;
+
+  submitRetro: (retro: Omit<Retro, "userId">) => void;
+
+  sendMessage: (groupId: ID, body: string) => void;
+  /** A message arriving from another member (Supabase Realtime insert) */
+  receiveMessage: (message: Omit<Message, "id" | "createdAt">) => void;
+}
+
+function nextRoles(state: SeedData, groupId: ID, members: ID[]): Session["roles"] {
+  // Rotate roles: shift by the number of sessions this group has already started.
+  const count = state.sessions.filter((s) => s.groupId === groupId && s.status !== "scheduled").length;
+  const roles: Session["roles"] = {};
+  members.forEach((userId, i) => {
+    roles[userId] = ROLE_ORDER[(i + count) % members.length] ?? undefined;
+  });
+  return roles;
+}
+
+/** Dates a series creates, up to `until` (the exam) or six weeks. Exported so forms can preview the count. */
+export function occurrences(start: Date, recurrence: Recurrence, until?: Date): Date[] {
+  if (recurrence === "none") return [start];
+  const out: Date[] = [];
+  const limit = until ?? addWeeks(start, 6);
+  let cursor = start;
+  let flip = false;
+  while (!isBefore(limit, cursor) && out.length < 24) {
+    out.push(cursor);
+    if (recurrence === "weekly") cursor = addWeeks(cursor, 1);
+    else {
+      // Twice weekly: alternate +3 and +4 days to stay on the same two weekdays
+      cursor = addDays(cursor, flip ? 4 : 3);
+      flip = !flip;
+    }
+  }
+  return out;
+}
+
+export const useStore = create<State>()(
+  persist(
+    (set, get) => {
+      const me = () => get().currentUserId!;
+      const patchSession = (id: ID, fn: (s: Session) => Session) =>
+        set((st) => ({ sessions: st.sessions.map((s) => (s.id === id ? fn(s) : s)) }));
+      const patchGroup = (id: ID, fn: (g: Group) => Group) =>
+        set((st) => ({ groups: st.groups.map((g) => (g.id === id ? fn(g) : g)) }));
+
+      return {
+        ...createSeed(),
+        currentUserId: null,
+        onboarded: false,
+
+        signIn: () => set({ currentUserId: "u-ada" }),
+        signOut: () => set({ currentUserId: null }),
+        updateProfile: (patch) =>
+          set((st) => ({ users: st.users.map((u) => (u.id === st.currentUserId ? { ...u, ...patch } : u)) })),
+        completeOnboarding: () => set({ onboarded: true }),
+        resetDemo: () => set({ ...createSeed(), onboarded: true }),
+
+        createCourse: ({ code, title, school }) => {
+          const norm = (s: string) => s.replace(/\s+/g, "").toLowerCase();
+          const exists = get().courses.find((c) => norm(c.code) === norm(code) && norm(c.school) === norm(school));
+          if (exists) return { ok: false, error: `${exists.code} at ${exists.school} already exists. Join it instead.` };
+          const id = uid("c");
+          const formatted = code.trim().toUpperCase().replace(/^([A-Z]+)\s*(\d+)/, "$1 $2");
+          set((st) => ({
+            courses: [...st.courses, { id, code: formatted, title: title.trim(), school: school.trim(), createdBy: me() }],
+            courseMembers: { ...st.courseMembers, [id]: [me()] },
+          }));
+          return { ok: true, id };
+        },
+        joinCourse: (courseId) =>
+          set((st) => ({
+            courseMembers: {
+              ...st.courseMembers,
+              [courseId]: Array.from(new Set([...(st.courseMembers[courseId] ?? []), me()])),
+            },
+          })),
+        leaveCourse: (courseId) =>
+          set((st) => ({
+            courseMembers: { ...st.courseMembers, [courseId]: (st.courseMembers[courseId] ?? []).filter((u) => u !== me()) },
+          })),
+
+        createGroup: (input) => {
+          const id = uid("g");
+          const now = new Date().toISOString();
+          get().joinCourse(input.courseId);
+          set((st) => ({
+            groups: [
+              ...st.groups,
+              {
+                id,
+                ...input,
+                inviteCode: inviteCode(input.name),
+                ownerId: me(),
+                members: [{ userId: me(), role: "owner", status: "active", joinedAt: now }],
+                createdAt: now,
+              },
+            ],
+          }));
+          return id;
+        },
+        updateGroup: (groupId, patch) => patchGroup(groupId, (g) => ({ ...g, ...patch })),
+        joinGroup: (groupId) => {
+          const g = get().groups.find((x) => x.id === groupId);
+          if (!g) return "full";
+          if (g.members.some((mm) => mm.userId === me())) return "already";
+          if (g.members.filter((mm) => mm.status === "active").length >= g.maxSize) return "full";
+          const status = g.visibility === "public" ? "active" : "pending";
+          get().joinCourse(g.courseId);
+          patchGroup(groupId, (gg) => ({
+            ...gg,
+            members: [...gg.members, { userId: me(), role: "member", status, joinedAt: new Date().toISOString() }],
+          }));
+          return status === "active" ? "joined" : "pending";
+        },
+        approveMember: (groupId, userId) =>
+          patchGroup(groupId, (g) => ({
+            ...g,
+            members: g.members.map((mm) => (mm.userId === userId ? { ...mm, status: "active" } : mm)),
+          })),
+        declineMember: (groupId, userId) =>
+          patchGroup(groupId, (g) => ({ ...g, members: g.members.filter((mm) => mm.userId !== userId) })),
+        removeMember: (groupId, userId) =>
+          patchGroup(groupId, (g) => ({ ...g, members: g.members.filter((mm) => mm.userId !== userId) })),
+        leaveGroup: (groupId) =>
+          patchGroup(groupId, (g) => ({ ...g, members: g.members.filter((mm) => mm.userId !== me()) })),
+        transferOwnership: (groupId, userId) =>
+          patchGroup(groupId, (g) => ({
+            ...g,
+            ownerId: userId,
+            members: g.members.map((mm) => ({
+              ...mm,
+              role: mm.userId === userId ? "owner" : mm.role === "owner" ? "member" : mm.role,
+            })),
+          })),
+
+        saveAvailability: (groupId, slots) =>
+          set((st) => {
+            const rest = st.availability.filter((a) => !(a.groupId === groupId && a.userId === me()));
+            const entry: Availability = { groupId, userId: me(), slots, updatedAt: new Date().toISOString() };
+            return { availability: [...rest, entry] };
+          }),
+
+        createSession: (input) => {
+          const st = get();
+          const group = st.groups.find((g) => g.id === input.groupId)!;
+          const active = group.members.filter((mm) => mm.status === "active").map((mm) => mm.userId);
+          const seriesId = input.recurrence === "none" ? undefined : uid("series");
+          const first = new Date(input.startsAt);
+          const series = occurrences(first, input.recurrence, group.examDate ? new Date(group.examDate) : undefined);
+          // A series that starts after the exam still creates the one session asked for
+          const dates = series.length ? series : [first];
+          const roles = nextRoles(st, input.groupId, active);
+          const videoUrl = input.locationType === "video" ? jitsiUrl() : undefined;
+          const prep: PrepItem[] = input.prep.filter(Boolean).map((text) => ({ id: uid("p"), text, doneBy: [] }));
+          const created: Session[] = dates.map((d) => ({
+            id: uid("s"),
+            groupId: input.groupId,
+            seriesId,
+            title: input.title,
+            template: input.template,
+            startsAt: d.toISOString(),
+            durationMin: input.durationMin,
+            location: input.locationType === "video" ? "Video call" : input.place || "To be decided",
+            videoUrl,
+            recurrence: input.recurrence,
+            agenda: input.agenda,
+            prep: prep.map((p) => ({ ...p, id: uid("p") })),
+            status: "scheduled",
+            currentStep: 0,
+            rsvps: { [me()]: "yes" },
+            roles,
+            jigsawTopics: input.jigsawTopics,
+            notes: { summary: "", openQuestions: "", actionItems: "" },
+          }));
+          set((s) => ({ sessions: [...s.sessions, ...created] }));
+          return created[0].id;
+        },
+        updateSession: (sessionId, patch) => patchSession(sessionId, (s) => ({ ...s, ...patch })),
+        deleteSession: (sessionId) => set((st) => ({ sessions: st.sessions.filter((s) => s.id !== sessionId) })),
+        rsvp: (sessionId, status) =>
+          patchSession(sessionId, (s) => ({ ...s, rsvps: { ...s.rsvps, [me()]: status } })),
+        togglePrep: (sessionId, prepId) =>
+          patchSession(sessionId, (s) => ({
+            ...s,
+            prep: s.prep.map((p) =>
+              p.id !== prepId ? p : { ...p, doneBy: p.doneBy.includes(me()) ? p.doneBy.filter((u) => u !== me()) : [...p.doneBy, me()] },
+            ),
+          })),
+        startSession: (sessionId) =>
+          patchSession(sessionId, (s) => ({
+            ...s,
+            status: "live",
+            currentStep: 0,
+            stepStartedAt: new Date().toISOString(),
+            pausedRemainingMs: undefined,
+          })),
+        goToStep: (sessionId, step) =>
+          patchSession(sessionId, (s) => ({
+            ...s,
+            currentStep: step,
+            stepStartedAt: new Date().toISOString(),
+            pausedRemainingMs: undefined,
+          })),
+        pauseSession: (sessionId) =>
+          patchSession(sessionId, (s) => {
+            const st = get();
+            const group = st.groups.find((g) => g.id === s.groupId);
+            const steps = stepsFor(s.template, s.durationMin, teachersFor(st, s, group));
+            const step = steps[s.currentStep];
+            const elapsed = Date.now() - new Date(s.stepStartedAt ?? Date.now()).getTime();
+            return { ...s, pausedRemainingMs: Math.max(0, (step?.minutes ?? 0) * 60_000 - elapsed) };
+          }),
+        resumeSession: (sessionId) =>
+          patchSession(sessionId, (s) => {
+            const st = get();
+            const group = st.groups.find((g) => g.id === s.groupId);
+            const steps = stepsFor(s.template, s.durationMin, teachersFor(st, s, group));
+            const total = (steps[s.currentStep]?.minutes ?? 0) * 60_000;
+            const remaining = s.pausedRemainingMs ?? total;
+            return {
+              ...s,
+              stepStartedAt: new Date(Date.now() - (total - remaining)).toISOString(),
+              pausedRemainingMs: undefined,
+            };
+          }),
+        endSession: (sessionId) => patchSession(sessionId, (s) => ({ ...s, status: "ended", pausedRemainingMs: undefined })),
+        updateNotes: (sessionId, patch) =>
+          patchSession(sessionId, (s) => ({ ...s, notes: { ...s.notes, ...patch, updatedAt: new Date().toISOString() } })),
+
+        addQuestion: (input) =>
+          set((st) => ({
+            questions: [{ ...input, id: uid("q"), createdBy: me(), createdAt: new Date().toISOString() }, ...st.questions],
+          })),
+        updateQuestion: (id, patch) =>
+          set((st) => ({ questions: st.questions.map((q) => (q.id === id ? { ...q, ...patch } : q)) })),
+        deleteQuestion: (id) => set((st) => ({ questions: st.questions.filter((q) => q.id !== id) })),
+        recordAttempt: (questionId, correct) =>
+          set((st) => ({
+            quizAttempts: [
+              ...st.quizAttempts,
+              { id: uid("a"), userId: me(), questionId, correct, attemptedAt: new Date().toISOString() },
+            ],
+          })),
+
+        submitRetro: (retro) =>
+          set((st) => ({
+            retros: [...st.retros.filter((r) => !(r.sessionId === retro.sessionId && r.userId === me())), { ...retro, userId: me() }],
+          })),
+
+        sendMessage: (groupId, body) => {
+          const message: Message = { id: uid("m"), groupId, userId: me(), body, createdAt: new Date().toISOString() };
+          set((st) => ({ messages: [...st.messages, message] }));
+        },
+        receiveMessage: (input) =>
+          set((st) => ({ messages: [...st.messages, { ...input, id: uid("m"), createdAt: new Date().toISOString() }] })),
+      };
+    },
+    {
+      name: "studycircle-demo-v1",
+      storage: createJSONStorage(() => localStorage),
+      skipHydration: true,
+    },
+  ),
+);
+
+export function teachersFor(
+  st: Pick<SeedData, "users">,
+  session: Session,
+  group: Group | undefined,
+): { name: string; topic?: string }[] {
+  if (session.template !== "jigsaw" || !group) return [];
+  return group.members
+    .filter((m) => m.status === "active" && session.jigsawTopics[m.userId])
+    .map((m) => ({
+      name: st.users.find((u) => u.id === m.userId)?.name ?? "Member",
+      topic: session.jigsawTopics[m.userId],
+    }));
+}
