@@ -55,7 +55,7 @@ Index every FK used in RLS lookups (group_members(user_id), sessions(group_id, s
 
 ## Auth
 - Trigger on `auth.users` insert → create `profiles` row: name = `raw_user_meta_data->>'full_name'` or `name` or email local-part; email; hue = abs(hashtext(id::text)) % 360.
-- Magic link + Google are configured in `config.toml` / dashboard; no SQL needed.
+- Magic link is configured in `config.toml` / dashboard; no SQL needed.
 
 ## RLS (enable on every table; deny by default)
 Helpers (security definer, stable): `is_group_member(gid)` (active), `is_group_owner(gid)`, `session_group(sid)`, `shares_group(other uuid)`.
