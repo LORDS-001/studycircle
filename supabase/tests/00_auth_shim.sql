@@ -12,4 +12,7 @@ create or replace function auth.uid() returns uuid language sql stable as $$ sel
 grant usage on schema auth to authenticated, anon, service_role;
 grant select on auth.users to authenticated, anon, service_role;
 grant execute on function auth.uid() to authenticated, anon, service_role;
+alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
+alter default privileges in schema public grant all on functions to anon, authenticated, service_role;
+alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
 do $$ begin if not exists(select 1 from pg_publication where pubname='supabase_realtime') then create publication supabase_realtime; end if; end $$;
