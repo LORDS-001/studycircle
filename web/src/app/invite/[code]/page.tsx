@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Link2Off, MailOpen } from "lucide-react";
 import { AuthGate } from "@/components/app/app-shell";
+import { CircleLoader } from "@/components/brand/logo";
 import { GroupPreview } from "@/components/app/group-preview";
 import { Logo } from "@/components/brand/logo";
 import { SeatRing } from "@/components/brand/rings";
@@ -12,6 +13,8 @@ import { Button } from "@/components/ui/button";
 import { EmptyState, Panel } from "@/components/ui/surface";
 import { activeMembers, useMe } from "@/lib/queries";
 import { useStore } from "@/lib/store";
+import { supabaseEnabled } from "@/lib/supabase/client";
+import { groupByInviteInSupabase, type InviteGroupPreview } from "@/lib/supabase/data";
 
 function safeDecode(s: string) {
   try {
@@ -49,8 +52,22 @@ function Invite() {
   const { code: rawCode } = useParams<{ code: string }>();
   const code = safeDecode(rawCode ?? "").trim();
   const me = useMe();
-  const group = useStore((s) => s.groups.find((g) => g.inviteCode.toLowerCase() === code.toLowerCase()));
-  const course = useStore((s) => s.courses.find((c) => c.id === group?.courseId));
+  const storedGroup = useStore((s) => s.groups.find((g) => g.inviteCode.toLowerCase() === code.toLowerCase()));
+  const [invitePreview, setInvitePreview] = React.useState<InviteGroupPreview | null | undefined>(supabaseEnabled ? undefined : null);
+  React.useEffect(() => {
+    if (!supabaseEnabled || !code) return;
+    let cancelled = false;
+    void groupByInviteInSupabase(code)
+      .then((value) => { if (!cancelled) setInvitePreview(value); })
+      .catch(() => { if (!cancelled) setInvitePreview(null); });
+    return () => { cancelled = true; };
+  }, [code]);
+  const group = supabaseEnabled ? invitePreview?.group : storedGroup;
+  const course = useStore((s) => s.courses.find((c) => c.id === group?.courseId)) ?? invitePreview?.course;
+
+  if (supabaseEnabled && invitePreview === undefined) {
+    return <div className="grid min-h-[40vh] place-items-center"><CircleLoader size={32} /></div>;
+  }
 
   if (!group) {
     return (
@@ -98,7 +115,7 @@ function Invite() {
         <MailOpen className="size-4" />
         You&rsquo;re invited to join a study group
       </p>
-      <GroupPreview group={group} />
+      <GroupPreview group={group} memberCount={invitePreview?.memberCount} course={course} />
     </>
   );
 }

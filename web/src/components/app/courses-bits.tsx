@@ -8,6 +8,8 @@ import { Field, Input } from "@/components/ui/field";
 import { Dialog, DialogContent, DialogFooter, DialogTrigger } from "@/components/ui/overlays";
 import { useMe } from "@/lib/queries";
 import { useStore } from "@/lib/store";
+import { supabaseEnabled } from "@/lib/supabase/client";
+import { createCourseInSupabase } from "@/lib/supabase/data";
 import type { Course, ID } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -84,7 +86,7 @@ export function CreateCourseForm({
   const [errors, setErrors] = React.useState<Errors>({});
   const [existing, setExisting] = React.useState<{ course: Course; message: string; alreadyIn: boolean } | null>(null);
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const next: Errors = {};
     if (!code.trim()) next.code = "Add the course code from your timetable, like CSC 201.";
@@ -95,7 +97,8 @@ export function CreateCourseForm({
     setExisting(null);
     if (Object.keys(next).length) return;
 
-    const result = createCourse({ code: code.trim(), title: title.trim(), school: school.trim() });
+    const courseInput = { code: code.trim(), title: title.trim(), school: school.trim() };
+    const result = supabaseEnabled ? await createCourseInSupabase(courseInput) : createCourse(courseInput);
     const st = useStore.getState();
     if (!result.ok) {
       const found = st.courses.find((c) => squash(c.code) === squash(code) && sameSchool(c.school, school));

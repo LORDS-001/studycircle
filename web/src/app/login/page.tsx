@@ -9,6 +9,9 @@ import { useHydrated } from "@/components/providers";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/field";
 import { useStore } from "@/lib/store";
+import { supabaseEnabled } from "@/lib/supabase/client";
+import { sendMagicLink, signInWithGoogle } from "@/lib/supabase/auth";
+import { errorText } from "@/lib/supabase/data";
 
 /** Only allow same-site paths as a post-login destination. */
 function safeNext(raw: string | null) {
@@ -62,7 +65,7 @@ function Login() {
           <SignInForm />
         </div>
         <p className="text-center text-xs leading-5 text-subtle-foreground">
-          This is a demo. No real emails are sent and nothing leaves your browser.
+          {supabaseEnabled ? "Sign in securely with your StudyCircle account." : "This is a demo. No real emails are sent and nothing leaves your browser."}
         </p>
       </main>
     </div>
@@ -159,18 +162,33 @@ function SignInForm() {
 
   const signIn = (address?: string) => useStore.getState().signIn(address);
 
-  const sendLink = (e: React.FormEvent) => {
+  const sendLink = async (e: React.FormEvent) => {
     e.preventDefault();
     const value = email.trim();
     if (!value) return setError("Enter your email address to get a sign-in link.");
     if (!EMAIL.test(value)) return setError("That email looks incomplete. Check for the @ and the part after it.");
     setError(null);
+    if (supabaseEnabled) {
+      try {
+        await sendMagicLink(value);
+      } catch (cause) {
+        setError(errorText(cause));
+        return;
+      }
+    }
     setStage("sent");
   };
 
-  const google = () => {
+  const google = async () => {
     setGooglePending(true);
-    window.setTimeout(() => signIn(), 450);
+    if (supabaseEnabled) {
+      try {
+        await signInWithGoogle();
+      } catch (cause) {
+        toast.error(errorText(cause));
+        setGooglePending(false);
+      }
+    } else window.setTimeout(() => signIn(), 450);
   };
 
   if (stage === "sent") {
@@ -188,14 +206,10 @@ function SignInForm() {
           this device and you&rsquo;re in.
         </p>
 
-        <div className="mt-8 rounded-2xl border border-dashed border-border-strong p-4">
-          <p className="text-sm text-muted-foreground">
-            In this demo there&rsquo;s no real email. Use the shortcut to open the link.
-          </p>
-          <Button size="lg" className="mt-3 w-full" onClick={() => signIn(email.trim())}>
-            Open the demo link
-          </Button>
-        </div>
+        {!supabaseEnabled && <div className="mt-8 rounded-2xl border border-dashed border-border-strong p-4">
+          <p className="text-sm text-muted-foreground">In this demo there&rsquo;s no real email. Use the shortcut to open the link.</p>
+          <Button size="lg" className="mt-3 w-full" onClick={() => signIn(email.trim())}>Open the demo link</Button>
+        </div>}
 
         <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
           <Button variant="link" className="h-11 px-0 font-semibold" onClick={() => setStage("start")}>
@@ -204,9 +218,12 @@ function SignInForm() {
           <Button
             variant="link"
             className="h-11 px-0 font-semibold text-muted-foreground"
-            onClick={() =>
-              toast.success("Sent again", { description: `Look for an email from StudyCircle at ${email.trim()}.` })
-            }
+            onClick={async () => {
+              if (supabaseEnabled) {
+                try { await sendMagicLink(email.trim()); toast.success("Sent again", { description: `Look for an email from StudyCircle at ${email.trim()}.` }); }
+                catch (cause) { toast.error(errorText(cause)); }
+              } else toast.success("Sent again", { description: `Look for an email from StudyCircle at ${email.trim()}.` });
+            }}
           >
             Resend link
           </Button>
