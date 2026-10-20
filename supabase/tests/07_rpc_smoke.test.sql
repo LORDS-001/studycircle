@@ -86,6 +86,10 @@ begin
   if public.session_group(current_setting('test.sid')::uuid) <> current_setting('test.public_gid')::uuid then raise exception 'session_group result incorrect'; end if;
   if not exists(select 1 from public.sessions where id=current_setting('test.sid')::uuid and recurrence='none' and location='Main Library') then raise exception 'create_session none/place missing'; end if;
   if not exists(select 1 from public.sessions where id=current_setting('test.weekly_sid')::uuid and recurrence='weekly' and video_url like 'https://meet.jit.si/%') then raise exception 'create_session weekly/video missing'; end if;
+  if (select starts_at from public.sessions where id=current_setting('test.weekly_sid')::uuid) <> (
+    select min(s.starts_at) from public.sessions s
+    where s.series_id=(select weekly.series_id from public.sessions weekly where weekly.id=current_setting('test.weekly_sid')::uuid)
+  ) then raise exception 'create_session weekly did not return earliest session'; end if;
   if not exists(select 1 from public.sessions where id=current_setting('test.twice_sid')::uuid and recurrence='twice-weekly' and location='Study Hall') then raise exception 'create_session twice-weekly/place missing'; end if;
   if (select count(*) from public.sessions where series_id=(select series_id from public.sessions where id=current_setting('test.weekly_sid')::uuid)) < 2 then raise exception 'weekly recurrence not generated'; end if;
   if (select count(*) from public.sessions where series_id=(select series_id from public.sessions where id=current_setting('test.twice_sid')::uuid)) < 2 then raise exception 'twice-weekly recurrence not generated'; end if;
