@@ -21,6 +21,8 @@ import { Field, Input, Textarea } from "@/components/ui/field";
 import { Panel } from "@/components/ui/surface";
 import { useGroup, useMe, useMyCourses } from "@/lib/queries";
 import { useStore } from "@/lib/store";
+import { supabaseEnabled } from "@/lib/supabase/client";
+import { createGroupInSupabase } from "@/lib/supabase/data";
 import { GOALS } from "@/lib/templates";
 import type { Course, Group, GroupGoal, Visibility } from "@/lib/types";
 import { cn, plural } from "@/lib/utils";
@@ -138,12 +140,12 @@ function NewGroup() {
     setStep(1);
   };
 
-  const create = (e: React.FormEvent) => {
+  const create = async (e: React.FormEvent) => {
     e.preventDefault();
     const found = validateCharter();
     setErrors(found);
     if (Object.keys(found).length) return;
-    const id = createGroup({
+    const input = {
       courseId: form.courseId,
       name: form.name.trim(),
       description: form.description.trim(),
@@ -153,8 +155,10 @@ function NewGroup() {
       norms: form.norms,
       cadence: form.cadence,
       examDate: form.examDate ? new Date(`${form.examDate}T09:00`).toISOString() : undefined,
-    });
-    setCreatedId(id);
+    };
+    if (supabaseEnabled) {
+      try { setCreatedId(await createGroupInSupabase(input)); } catch { /* Error is shown by the data layer. */ }
+    } else setCreatedId(createGroup(input));
   };
 
   if (createdId) return <CreatedScreen groupId={createdId} headingRef={headingRef} />;

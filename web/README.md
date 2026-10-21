@@ -17,7 +17,7 @@ npx tsc --noEmit # type-check only
 
 There's no backend yet, so the app runs on demo data saved in your browser.
 
-1. On the landing page, choose **Get started** and sign in with any email (or the Google button). You're signed in as **Ada**, who organises *Trees and Graphs Crew* (CSC 201) and is a member of *Eigen Friends* (MTH 201).
+1. On the landing page, choose **Get started** and sign in with any email. You're signed in as **Ada**, who organises *Trees and Graphs Crew* (CSC 201) and is a member of *Eigen Friends* (MTH 201).
 2. Open **Trees and Graphs Crew** and try each tab: Overview, Sessions, Availability, Questions, Notes, Chat and Members.
 3. On **Availability**, switch to "Your week" and drag across the grid to paint your free time. Save it and the group heatmap and suggested times update.
 4. Open the next session and press **Start session** to enter Session Mode. Space pauses and the arrow keys move between steps. Open the same page in a second tab to see the timer stay in sync.

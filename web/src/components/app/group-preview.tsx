@@ -11,23 +11,36 @@ import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/surface";
 import { activeMembers, useMe, useUserMap } from "@/lib/queries";
 import { useStore } from "@/lib/store";
+import { supabaseEnabled } from "@/lib/supabase/client";
+import { joinGroupInSupabase } from "@/lib/supabase/data";
 import type { Group } from "@/lib/types";
 
 /** What a non-member sees: who's in it, the charter, and how to join. */
-export function GroupPreview({ group }: { group: Group }) {
+export function GroupPreview({ group, memberCount, course: courseOverride }: {
+  group: Group;
+  memberCount?: number;
+  course?: { id: string; code: string; title: string };
+}) {
   const me = useMe();
   const users = useUserMap();
   const router = useRouter();
-  const course = useStore((s) => s.courses.find((c) => c.id === group.courseId));
+  const storedCourse = useStore((s) => s.courses.find((c) => c.id === group.courseId));
+  const course = courseOverride ?? storedCourse;
   const joinGroup = useStore((s) => s.joinGroup);
   const declineMember = useStore((s) => s.declineMember);
   const members = activeMembers(group);
+  const totalMembers = memberCount ?? members.length;
   const owner = users[group.ownerId];
-  const full = members.length >= group.maxSize;
+  const full = totalMembers >= group.maxSize;
   const pending = group.members.some((m) => m.userId === me.id && m.status === "pending");
 
-  const join = () => {
-    const result = joinGroup(group.id);
+  const join = async () => {
+    let result: "joined" | "pending" | "full" | "already";
+    try {
+      result = supabaseEnabled ? await joinGroupInSupabase(group.id) : joinGroup(group.id);
+    } catch {
+      return;
+    }
     if (result === "joined") {
       toast.success(`Welcome to ${group.name}`, { description: "Add your availability so the group can find a time." });
       router.push(`/groups/${group.id}/availability`);
@@ -42,7 +55,7 @@ export function GroupPreview({ group }: { group: Group }) {
     <div className="stagger space-y-4">
       <Panel className="overflow-hidden">
         <div className="flex flex-col gap-6 p-6 sm:flex-row sm:items-center sm:p-8">
-          <SeatRing filled={members.length} total={group.maxSize} size={72} />
+          <SeatRing filled={totalMembers} total={group.maxSize} size={72} />
           <div className="min-w-0 flex-1">
             {course && (
               <Link href={`/courses/${course.id}`} className="text-sm font-semibold text-teal-text hover:underline">
@@ -57,7 +70,7 @@ export function GroupPreview({ group }: { group: Group }) {
             <div className="mt-4 flex items-center gap-3">
               <AvatarStack users={members.map((m) => users[m.userId])} size="sm" max={6} />
               <span className="text-sm text-muted-foreground">
-                {members.length} of {group.maxSize} members · Organised by {owner?.name}
+                {totalMembers} of {group.maxSize} members · Organised by {owner?.name}
               </span>
             </div>
           </div>

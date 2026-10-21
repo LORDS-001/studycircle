@@ -5,6 +5,7 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { createSeed, type SeedData } from "./seed";
 import { ROLE_ORDER, stepsFor } from "./templates";
+import { supabaseEnabled } from "./supabase/client";
 import type {
   Availability,
   Group,
@@ -22,10 +23,7 @@ import type {
   Visibility,
 } from "./types";
 
-/*
- * Client-side mock backend. Every action maps 1:1 to a future Supabase call
- * (insert/update + RLS), so screens won't change when the real backend lands.
- */
+/* Demo mode persists locally; Supabase mode uses only its loaded server snapshot. */
 
 export const uid = (prefix = "id") =>
   `${prefix}-${Math.random().toString(36).slice(2, 8)}${Date.now().toString(36).slice(-4)}`;
@@ -140,9 +138,62 @@ export function occurrences(start: Date, recurrence: Recurrence, until?: Date): 
   return out;
 }
 
+const emptyData: SeedData = {
+  users: [],
+  courses: [],
+  courseMembers: {},
+  groups: [],
+  sessions: [],
+  questions: [],
+  quizAttempts: [],
+  retros: [],
+  messages: [],
+  availability: [],
+};
+
+const inertStorage = {
+  getItem: () => null,
+  setItem: () => undefined,
+  removeItem: () => undefined,
+};
+
 export const useStore = create<State>()(
   persist(
     (set, get) => {
+      const rpc = (name: string, args: Record<string, unknown> = {}) => {
+        if (supabaseEnabled) void import("./supabase/data").then(({ runRpc }) => runRpc(name, args)).catch(() => undefined);
+      };
+      const write = (table: string, operation: "insert" | "upsert" | "update" | "delete", payload: Record<string, unknown>, match?: Record<string, unknown>) => {
+        if (!supabaseEnabled) return;
+        void import("./supabase/client").then(async ({ getSupabase }) => {
+          const client = getSupabase();
+          const criteria = Object.entries(match ?? {});
+          let response;
+          if (operation === "insert") response = await client.from(table).insert(payload);
+          else if (operation === "upsert") response = await client.from(table).upsert(payload);
+          else if (operation === "update") {
+            let query = client.from(table).update(payload);
+            for (const [key, value] of criteria) query = query.eq(key, value);
+            response = await query;
+          } else {
+            let query = client.from(table).delete();
+            for (const [key, value] of criteria) query = query.eq(key, value);
+            response = await query;
+          }
+          const { error } = response;
+          if (error) throw error;
+          const { loadSupabaseData } = await import("./supabase/data");
+          await loadSupabaseData();
+        }).catch((error: unknown) => import("./supabase/data").then(({ showSupabaseError }) => showSupabaseError(error)));
+      };
+      const timerStepMs = (sessionId: ID) => {
+        const st = get();
+        const session = st.sessions.find((s) => s.id === sessionId);
+        if (!session) return 0;
+        const group = st.groups.find((g) => g.id === session.groupId);
+        const steps = stepsFor(session.template, session.durationMin, teachersFor(st, session, group));
+        return Math.round((steps[session.currentStep]?.minutes ?? 0) * 60_000);
+      };
       const me = () => get().currentUserId!;
       const patchSession = (id: ID, fn: (s: Session) => Session) =>
         set((st) => ({ sessions: st.sessions.map((s) => (s.id === id ? fn(s) : s)) }));
@@ -150,18 +201,26 @@ export const useStore = create<State>()(
         set((st) => ({ groups: st.groups.map((g) => (g.id === id ? fn(g) : g)) }));
 
       return {
-        ...createSeed(),
+        ...(supabaseEnabled ? emptyData : createSeed()),
         currentUserId: null,
         onboarded: false,
 
-        signIn: () => set({ currentUserId: "u-ada" }),
-        signOut: () => set({ currentUserId: null }),
+        signIn: () => { if (!supabaseEnabled) set({ currentUserId: "u-ada" }); },
+        signOut: () => {
+          if (supabaseEnabled) void import("./supabase/client").then(({ getSupabase }) => getSupabase().auth.signOut()).then(() => set({ currentUserId: null, onboarded: false }));
+          else set({ currentUserId: null });
+        },
         updateProfile: (patch) =>
-          set((st) => ({ users: st.users.map((u) => (u.id === st.currentUserId ? { ...u, ...patch } : u)) })),
-        completeOnboarding: () => set({ onboarded: true }),
-        resetDemo: () => set({ ...createSeed(), onboarded: true }),
+          supabaseEnabled
+            ? write("profiles", "update", { ...(patch.name !== undefined ? { name: patch.name } : {}), ...(patch.school !== undefined ? { school: patch.school } : {}), ...(patch.emailPrefs ? { email_reminders: patch.emailPrefs.reminders, email_group_activity: patch.emailPrefs.groupActivity, email_retros: patch.emailPrefs.retros } : {}) }, { id: me() })
+            : set((st) => ({ users: st.users.map((u) => (u.id === st.currentUserId ? { ...u, ...patch } : u)) })),
+        completeOnboarding: () => { if (supabaseEnabled) { set({ onboarded: true }); write("profiles", "update", { onboarded: true }, { id: me() }); } else set({ onboarded: true }); },
+        resetDemo: () => { if (!supabaseEnabled) set({ ...createSeed(), onboarded: true }); },
 
         createCourse: ({ code, title, school }) => {
+          if (supabaseEnabled) {
+            return { ok: false, error: "Use the asynchronous Supabase course action." };
+          }
           const norm = (s: string) => s.replace(/\s+/g, "").toLowerCase();
           const exists = get().courses.find((c) => norm(c.code) === norm(code) && norm(c.school) === norm(school));
           if (exists) return { ok: false, error: `${exists.code} at ${exists.school} already exists. Join it instead.` };
@@ -173,19 +232,26 @@ export const useStore = create<State>()(
           }));
           return { ok: true, id };
         },
-        joinCourse: (courseId) =>
+        joinCourse: (courseId) => supabaseEnabled
+          ? write("course_members", "upsert", { course_id: courseId, user_id: me() })
+          :
           set((st) => ({
             courseMembers: {
               ...st.courseMembers,
               [courseId]: Array.from(new Set([...(st.courseMembers[courseId] ?? []), me()])),
             },
           })),
-        leaveCourse: (courseId) =>
+        leaveCourse: (courseId) => supabaseEnabled
+          ? write("course_members", "delete", {}, { course_id: courseId, user_id: me() })
+          :
           set((st) => ({
             courseMembers: { ...st.courseMembers, [courseId]: (st.courseMembers[courseId] ?? []).filter((u) => u !== me()) },
           })),
 
         createGroup: (input) => {
+          if (supabaseEnabled) {
+            throw new Error("Use the asynchronous Supabase group action.");
+          }
           const id = uid("g");
           const now = new Date().toISOString();
           get().joinCourse(input.courseId);
@@ -204,8 +270,13 @@ export const useStore = create<State>()(
           }));
           return id;
         },
-        updateGroup: (groupId, patch) => patchGroup(groupId, (g) => ({ ...g, ...patch })),
+        updateGroup: (groupId, patch) => supabaseEnabled
+          ? write("groups", "update", { ...(patch.name !== undefined ? { name: patch.name } : {}), ...(patch.description !== undefined ? { description: patch.description } : {}), ...(patch.maxSize !== undefined ? { max_size: patch.maxSize } : {}), ...(patch.visibility !== undefined ? { visibility: patch.visibility } : {}), ...(patch.goal !== undefined ? { goal: patch.goal } : {}), ...(patch.norms !== undefined ? { norms: patch.norms } : {}), ...(patch.cadence !== undefined ? { cadence: patch.cadence } : {}), ...(patch.examDate !== undefined ? { exam_date: patch.examDate } : {}), ...(patch.pinnedMessage !== undefined ? { pinned_message: patch.pinnedMessage } : {}) }, { id: groupId })
+          : patchGroup(groupId, (g) => ({ ...g, ...patch })),
         joinGroup: (groupId) => {
+          if (supabaseEnabled) {
+            throw new Error("Use the asynchronous Supabase group join action.");
+          }
           const g = get().groups.find((x) => x.id === groupId);
           if (!g) return "full";
           if (g.members.some((mm) => mm.userId === me())) return "already";
@@ -218,18 +289,18 @@ export const useStore = create<State>()(
           }));
           return status === "active" ? "joined" : "pending";
         },
-        approveMember: (groupId, userId) =>
+        approveMember: (groupId, userId) => supabaseEnabled ? rpc("approve_member", { group_id: groupId, user_id: userId }) :
           patchGroup(groupId, (g) => ({
             ...g,
             members: g.members.map((mm) => (mm.userId === userId ? { ...mm, status: "active" } : mm)),
           })),
-        declineMember: (groupId, userId) =>
+        declineMember: (groupId, userId) => supabaseEnabled ? rpc("decline_member", { group_id: groupId, user_id: userId }) :
           patchGroup(groupId, (g) => ({ ...g, members: g.members.filter((mm) => mm.userId !== userId) })),
-        removeMember: (groupId, userId) =>
+        removeMember: (groupId, userId) => supabaseEnabled ? rpc("remove_member", { group_id: groupId, user_id: userId }) :
           patchGroup(groupId, (g) => ({ ...g, members: g.members.filter((mm) => mm.userId !== userId) })),
-        leaveGroup: (groupId) =>
+        leaveGroup: (groupId) => supabaseEnabled ? rpc("leave_group", { group_id: groupId }) :
           patchGroup(groupId, (g) => ({ ...g, members: g.members.filter((mm) => mm.userId !== me()) })),
-        transferOwnership: (groupId, userId) =>
+        transferOwnership: (groupId, userId) => supabaseEnabled ? rpc("transfer_ownership", { group_id: groupId, user_id: userId }) :
           patchGroup(groupId, (g) => ({
             ...g,
             ownerId: userId,
@@ -239,7 +310,7 @@ export const useStore = create<State>()(
             })),
           })),
 
-        saveAvailability: (groupId, slots) =>
+        saveAvailability: (groupId, slots) => supabaseEnabled ? rpc("save_availability", { group_id: groupId, slots }) :
           set((st) => {
             const rest = st.availability.filter((a) => !(a.groupId === groupId && a.userId === me()));
             const entry: Availability = { groupId, userId: me(), slots, updatedAt: new Date().toISOString() };
@@ -247,6 +318,9 @@ export const useStore = create<State>()(
           }),
 
         createSession: (input) => {
+          if (supabaseEnabled) {
+            throw new Error("Use the asynchronous Supabase session action.");
+          }
           const st = get();
           const group = st.groups.find((g) => g.id === input.groupId)!;
           const active = group.members.filter((mm) => mm.status === "active").map((mm) => mm.userId);
@@ -281,18 +355,20 @@ export const useStore = create<State>()(
           set((s) => ({ sessions: [...s.sessions, ...created] }));
           return created[0].id;
         },
-        updateSession: (sessionId, patch) => patchSession(sessionId, (s) => ({ ...s, ...patch })),
-        deleteSession: (sessionId) => set((st) => ({ sessions: st.sessions.filter((s) => s.id !== sessionId) })),
-        rsvp: (sessionId, status) =>
+        updateSession: (sessionId, patch) => supabaseEnabled
+          ? rpc("update_session", { session_id: sessionId, patch: { ...(patch.title !== undefined ? { title: patch.title } : {}), ...(patch.startsAt !== undefined ? { starts_at: patch.startsAt } : {}), ...(patch.durationMin !== undefined ? { duration_min: patch.durationMin } : {}), ...(patch.location !== undefined ? { location: patch.location } : {}), ...(patch.videoUrl !== undefined ? { video_url: patch.videoUrl } : {}), ...(patch.agenda !== undefined ? { agenda: patch.agenda } : {}), ...(patch.template !== undefined ? { template: patch.template } : {}) } })
+          : patchSession(sessionId, (s) => ({ ...s, ...patch })),
+        deleteSession: (sessionId) => supabaseEnabled ? rpc("delete_session", { session_id: sessionId }) : set((st) => ({ sessions: st.sessions.filter((s) => s.id !== sessionId) })),
+        rsvp: (sessionId, status) => supabaseEnabled ? rpc("rsvp", { session_id: sessionId, status }) :
           patchSession(sessionId, (s) => ({ ...s, rsvps: { ...s.rsvps, [me()]: status } })),
-        togglePrep: (sessionId, prepId) =>
+        togglePrep: (sessionId, prepId) => supabaseEnabled ? rpc("toggle_prep", { prep_id: prepId }) :
           patchSession(sessionId, (s) => ({
             ...s,
             prep: s.prep.map((p) =>
               p.id !== prepId ? p : { ...p, doneBy: p.doneBy.includes(me()) ? p.doneBy.filter((u) => u !== me()) : [...p.doneBy, me()] },
             ),
           })),
-        startSession: (sessionId) =>
+        startSession: (sessionId) => supabaseEnabled ? rpc("start_session", { sid: sessionId }) :
           patchSession(sessionId, (s) => ({
             ...s,
             status: "live",
@@ -300,14 +376,14 @@ export const useStore = create<State>()(
             stepStartedAt: new Date().toISOString(),
             pausedRemainingMs: undefined,
           })),
-        goToStep: (sessionId, step) =>
+        goToStep: (sessionId, step) => supabaseEnabled ? rpc("go_to_step", { sid: sessionId, step }) :
           patchSession(sessionId, (s) => ({
             ...s,
             currentStep: step,
             stepStartedAt: new Date().toISOString(),
             pausedRemainingMs: undefined,
           })),
-        pauseSession: (sessionId) =>
+        pauseSession: (sessionId) => supabaseEnabled ? rpc("pause_session", { sid: sessionId, step_ms: timerStepMs(sessionId) }) :
           patchSession(sessionId, (s) => {
             const st = get();
             const group = st.groups.find((g) => g.id === s.groupId);
@@ -316,7 +392,7 @@ export const useStore = create<State>()(
             const elapsed = Date.now() - new Date(s.stepStartedAt ?? Date.now()).getTime();
             return { ...s, pausedRemainingMs: Math.max(0, (step?.minutes ?? 0) * 60_000 - elapsed) };
           }),
-        resumeSession: (sessionId) =>
+        resumeSession: (sessionId) => supabaseEnabled ? rpc("resume_session", { sid: sessionId, step_ms: timerStepMs(sessionId) }) :
           patchSession(sessionId, (s) => {
             const st = get();
             const group = st.groups.find((g) => g.id === s.groupId);
@@ -329,18 +405,18 @@ export const useStore = create<State>()(
               pausedRemainingMs: undefined,
             };
           }),
-        endSession: (sessionId) => patchSession(sessionId, (s) => ({ ...s, status: "ended", pausedRemainingMs: undefined })),
-        updateNotes: (sessionId, patch) =>
+        endSession: (sessionId) => supabaseEnabled ? rpc("end_session", { sid: sessionId }) : patchSession(sessionId, (s) => ({ ...s, status: "ended", pausedRemainingMs: undefined })),
+        updateNotes: (sessionId, patch) => supabaseEnabled ? rpc("update_notes", { sid: sessionId, summary: patch.summary ?? null, open_questions: patch.openQuestions ?? null, action_items: patch.actionItems ?? null }) :
           patchSession(sessionId, (s) => ({ ...s, notes: { ...s.notes, ...patch, updatedAt: new Date().toISOString() } })),
 
-        addQuestion: (input) =>
+        addQuestion: (input) => supabaseEnabled ? write("questions", "insert", { group_id: input.groupId, topic: input.topic, prompt: input.prompt, answer: input.answer, explanation: input.explanation ?? null, created_by: me() }) :
           set((st) => ({
             questions: [{ ...input, id: uid("q"), createdBy: me(), createdAt: new Date().toISOString() }, ...st.questions],
           })),
-        updateQuestion: (id, patch) =>
+        updateQuestion: (id, patch) => supabaseEnabled ? write("questions", "update", { ...(patch.topic !== undefined ? { topic: patch.topic } : {}), ...(patch.prompt !== undefined ? { prompt: patch.prompt } : {}), ...(patch.answer !== undefined ? { answer: patch.answer } : {}), ...(patch.explanation !== undefined ? { explanation: patch.explanation } : {}) }, { id }) :
           set((st) => ({ questions: st.questions.map((q) => (q.id === id ? { ...q, ...patch } : q)) })),
-        deleteQuestion: (id) => set((st) => ({ questions: st.questions.filter((q) => q.id !== id) })),
-        recordAttempt: (questionId, correct) =>
+        deleteQuestion: (id) => supabaseEnabled ? write("questions", "delete", {}, { id }) : set((st) => ({ questions: st.questions.filter((q) => q.id !== id) })),
+        recordAttempt: (questionId, correct) => supabaseEnabled ? write("quiz_attempts", "insert", { user_id: me(), question_id: questionId, correct }) :
           set((st) => ({
             quizAttempts: [
               ...st.quizAttempts,
@@ -348,12 +424,13 @@ export const useStore = create<State>()(
             ],
           })),
 
-        submitRetro: (retro) =>
+        submitRetro: (retro) => supabaseEnabled ? rpc("submit_retro", { sid: retro.sessionId, rating: retro.rating, helped: retro.helped, change: retro.change, balanced: retro.balanced }) :
           set((st) => ({
             retros: [...st.retros.filter((r) => !(r.sessionId === retro.sessionId && r.userId === me())), { ...retro, userId: me() }],
           })),
 
         sendMessage: (groupId, body) => {
+          if (supabaseEnabled) { write("messages", "insert", { group_id: groupId, user_id: me(), body }); return; }
           const message: Message = { id: uid("m"), groupId, userId: me(), body, createdAt: new Date().toISOString() };
           set((st) => ({ messages: [...st.messages, message] }));
         },
@@ -363,7 +440,7 @@ export const useStore = create<State>()(
     },
     {
       name: "studycircle-demo-v1",
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() => supabaseEnabled ? inertStorage : localStorage),
       skipHydration: true,
     },
   ),

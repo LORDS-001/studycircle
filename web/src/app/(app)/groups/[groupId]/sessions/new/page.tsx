@@ -18,6 +18,8 @@ import { Panel } from "@/components/ui/surface";
 import { useCurrentGroup } from "@/lib/group-context";
 import { activeMembers, useUserMap } from "@/lib/queries";
 import { useStore } from "@/lib/store";
+import { supabaseEnabled } from "@/lib/supabase/client";
+import { createSessionInSupabase } from "@/lib/supabase/data";
 import { TEMPLATES, stepsFor } from "@/lib/templates";
 import type { Recurrence, SessionTemplate } from "@/lib/types";
 import { SLOT_COUNT, SLOT_START_HOUR, cn, firstName, formatDay, formatDuration, plural } from "@/lib/utils";
@@ -121,13 +123,13 @@ function NewSessionForm() {
     setPrepDraft("");
   };
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitted(true);
     if (errors.title) return titleRef.current?.focus();
     if (errors.date || !validStart) return dateRef.current?.focus();
 
-    const id = createSession({
+    const input = {
       groupId: group.id,
       title: title.trim(),
       template,
@@ -142,7 +144,13 @@ function NewSessionForm() {
         template === "jigsaw"
           ? Object.fromEntries(Object.entries(topics).map(([k, v]) => [k, v.trim()]).filter(([, v]) => v))
           : {},
-    });
+    };
+    let id: string;
+    try {
+      id = supabaseEnabled ? await createSessionInSupabase(input) : createSession(input);
+    } catch {
+      return;
+    }
     toast.success("Session scheduled. Members will get an email.", {
       description: dates.length > 1 ? `${dates.length} sessions are on the calendar.` : undefined,
     });
